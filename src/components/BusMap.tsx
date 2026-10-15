@@ -4,7 +4,7 @@ import stops from "@/data/stops.json";
 import shapes from "@/data/shapes.json";
 import { ROUTES, routeColor, routeMeta } from "@/data/routes";
 import { stopSanAntonioStatus } from "@/lib/sanAntonio";
-import { slugForStop } from "@/data/stop-slugs";
+import { plateFor } from "@/data/bus-plates";
 import { trackStopVisit } from "@/lib/favorites";
 import { parseOccupancy, occupancyHtml } from "@/lib/occupancy";
 
