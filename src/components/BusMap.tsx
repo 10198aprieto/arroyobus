@@ -5,6 +5,7 @@ import shapes from "@/data/shapes.json";
 import { ROUTES, routeColor, routeMeta } from "@/data/routes";
 import { stopSanAntonioStatus } from "@/lib/sanAntonio";
 import { slugForStop } from "@/data/stop-slugs";
+import { plateFor } from "@/data/bus-plates";
 import { trackStopVisit } from "@/lib/favorites";
 import { parseOccupancy, occupancyHtml } from "@/lib/occupancy";
 
@@ -119,13 +120,14 @@ export default function BusMap() {
         const label = esc(String(e.vehicle?.vehicle?.label || e.vehicle?.vehicle?.id || id));
         const meta = routeMeta(routeId);
         const route = esc(String(meta?.name || routeId || "—"));
+        const plate = plateFor(id);
         const speedKmh = pos.speed != null ? pos.speed * 3.6 : null;
         const speed = speedKmh != null ? `${speedKmh.toFixed(0)} km/h` : "—";
 
         const popupContent = `
           <div style="font-family:system-ui;font-size:13px;line-height:1.5;min-width:170px">
             <div style="display:inline-block;background:${color};color:#fff;font-weight:700;font-size:11px;padding:2px 8px;border-radius:10px;margin-bottom:4px">${route}</div>
-            <div><strong>🚍 ${label}</strong></div>
+            <div><strong>🚍 ${label}</strong>${plate ? ` · ${esc(plate)}` : ""}</div>
             <div>Velocidad: ${speed}</div>
             ${occupancyHtml(parseOccupancy((e.vehicle as any)?.occupancyStatus, (e.vehicle as any)?.occupancyPercentage))}
             <a href="/api/buses/${encodeURIComponent(label)}" style="display:inline-block;margin-top:6px;font-size:11px;color:#1d4ed8;font-weight:600">Datos del bus →</a>
