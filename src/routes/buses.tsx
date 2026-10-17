@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { plateFor } from "@/data/bus-plates";
 import { ArrowLeft, Bus, Copy, RefreshCw, ExternalLink, Check } from "lucide-react";
 
 export const Route = createFileRoute("/buses")({
@@ -17,7 +16,6 @@ export const Route = createFileRoute("/buses")({
 interface BusItem {
   vehicleId: string;
   label: string;
-  plate?: string | null;
   routeId: string | null;
   lat: number;
   lon: number;
@@ -152,10 +150,7 @@ function BusesPage() {
                       {b.routeId || "—"}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold">
-                        Bus {b.label}
-                        {b.plate && <span className="ml-2 text-[11px] font-normal text-muted-foreground tabular-nums">{b.plate}</span>}
-                      </p>
+                      <p className="text-sm font-semibold">Bus {b.label}</p>
                       <p className="text-[11px] text-muted-foreground tabular-nums">
                         {b.lat.toFixed(5)}, {b.lon.toFixed(5)}
                         {typeof b.speed === "number" && ` · ${Math.round(b.speed * 3.6)} km/h`}
