@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { fetchAllVehiclePositions, fetchAllArrivals } from "@/lib/gtfsrt/fetch-arrivals";
 import { parseOccupancy } from "@/lib/occupancy";
+import { plateFor } from "@/data/plates";
 
 export const Route = createFileRoute("/api/buses/$vehicleId")({
   server: {
@@ -39,6 +40,7 @@ export const Route = createFileRoute("/api/buses/$vehicleId")({
             {
               vehicleId: v.vehicleId,
               label: v.vehicleName ?? v.vehicleId,
+              plate: plateFor(v.vehicleName, v.vehicleId),
               routeId: v.routeId || null,
               position: { lat: v.lat, lon: v.lon, speed: v.speed ?? null, bearing: v.bearing ?? null },
               timestamp: v.timestamp ?? null,
