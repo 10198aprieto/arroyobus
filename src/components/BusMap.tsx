@@ -125,7 +125,7 @@ export default function BusMap() {
         const popupContent = `
           <div style="font-family:system-ui;font-size:13px;line-height:1.5;min-width:170px">
             <div style="display:inline-block;background:${color};color:#fff;font-weight:700;font-size:11px;padding:2px 8px;border-radius:10px;margin-bottom:4px">${route}</div>
-            <div><strong>🚍 ${label}</strong></div>
+            <div><strong>🚍 ${label}</strong>${plateFor(label) ? ` <span style="font-size:11px;opacity:.75">· ${plateFor(label)}</span>` : ""}</div>
             <div>Velocidad: ${speed}</div>
             ${occupancyHtml(parseOccupancy((e.vehicle as any)?.occupancyStatus, (e.vehicle as any)?.occupancyPercentage))}
             <a href="/api/buses/${encodeURIComponent(label)}" style="display:inline-block;margin-top:6px;font-size:11px;color:#1d4ed8;font-weight:600">Datos del bus →</a>
