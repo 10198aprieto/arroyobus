@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Bus, Search, MapPin, RefreshCw, ArrowLeft, Map as MapIcon, CreditCard, Plus, Trash2, X, Pencil, ScanLine, Camera, Radio, CalendarClock, ChevronRight } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bus, Search, MapPin, RefreshCw, ArrowLeft, Map as MapIcon, CreditCard, Plus, Trash2, X, Pencil, ScanLine, Camera, Radio, CalendarClock, ChevronRight, WifiOff, LocateFixed } from "lucide-react";
 import QRCode from "qrcode";
 import stopsData from "@/data/stops.json";
 import { loadCards, addCard, removeCard, updateCard, type BuscylCard } from "@/lib/buscyl-cards";
@@ -9,7 +9,7 @@ import StopSanAntonioNotice from "@/components/StopSanAntonioNotice";
 import StopScheduleViewer from "@/components/StopScheduleViewer";
 import { slugForStop } from "@/data/stop-slugs";
 import { stopSanAntonioStatus } from "@/lib/sanAntonio";
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { useIsIOS, haptic } from "@/hooks/use-platform";
 
 interface Stop { id: string; name: string; desc: string; lat: number; lon: number }
@@ -27,21 +27,31 @@ interface Arrival {
   isScheduled?: boolean;
 }
 
+type AppSearch = { parada?: string; tab?: "stops" | "cards" };
+
 export const Route = createFileRoute("/app")({
+  validateSearch: (s: Record<string, unknown>): AppSearch => ({
+    parada: typeof s.parada === "string" || typeof s.parada === "number" ? String(s.parada) : undefined,
+    tab: s.tab === "cards" ? "cards" : undefined,
+  }),
   component: AppPage,
   head: () => ({
     meta: [
       { title: "ArroyoBus — Próximas llegadas" },
       { name: "description", content: "Consulta las próximas llegadas de los autobuses de Arroyo de la Encomienda en tiempo real desde el móvil." },
-      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { name: "theme-color", content: "#1d4ed8" },
       { property: "og:title", content: "ArroyoBus — Próximas llegadas" },
       { property: "og:description", content: "Consulta las próximas llegadas de los autobuses de Arroyo de la Encomienda en tiempo real." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
 });
 
 const stops = stopsData as Stop[];
+const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const fmtDist = (d: number) => (d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`);
 
 // Distancia haversine en metros
 function distance(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
@@ -57,171 +67,188 @@ function distance(a: { lat: number; lon: number }, b: { lat: number; lon: number
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
+type GeoState = "idle" | "locating" | "ok" | "denied" | "unavailable";
+
 function AppPage() {
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: "/app" });
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Stop | null>(null);
   const [userPos, setUserPos] = useState<{ lat: number; lon: number } | null>(null);
-  const [tab, setTab] = useState<"stops" | "cards">("stops");
+  const [geo, setGeo] = useState<GeoState>("idle");
+  const tab = search.tab ?? "stops";
+  const selected = useMemo(() => stops.find((s) => s.id === search.parada) ?? null, [search.parada]);
   const isIOS = useIsIOS();
 
-  useEffect(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+  const locate = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) { setGeo("unavailable"); return; }
+    setGeo("locating");
     navigator.geolocation.getCurrentPosition(
-      (p) => setUserPos({ lat: p.coords.latitude, lon: p.coords.longitude }),
-      () => {},
-      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+      (p) => { setUserPos({ lat: p.coords.latitude, lon: p.coords.longitude }); setGeo("ok"); },
+      (e) => setGeo(e.code === 1 ? "denied" : "unavailable"),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
     );
   }, []);
 
+  useEffect(() => { locate(); }, [locate]);
+
+  const setTab = (t: "stops" | "cards") => navigate({ search: { tab: t === "cards" ? "cards" : undefined } });
+  const openStop = (s: Stop) => { haptic(); navigate({ search: { parada: s.id } }); };
+
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = norm(query.trim());
     let list = stops;
     if (q) {
-      list = list.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.id === q ||
-          s.desc.toLowerCase().includes(q)
-      );
+      list = list.filter((s) => s.id === q || norm(s.name).includes(q) || norm(s.desc).includes(q));
     }
-    if (userPos) {
-      list = [...list].sort(
-        (a, b) => distance(userPos, a) - distance(userPos, b)
-      );
-    } else {
-      list = [...list].sort((a, b) => Number(a.id) - Number(b.id));
-    }
-    return list;
+    return userPos
+      ? [...list].sort((a, b) => distance(userPos, a) - distance(userPos, b))
+      : [...list].sort((a, b) => Number(a.id) - Number(b.id));
   }, [query, userPos]);
 
   if (selected) {
-    return <StopDetail stop={selected} onBack={() => setSelected(null)} userPos={userPos} />;
+    return <StopDetail stop={selected} onBack={() => (window.history.length > 1 ? window.history.back() : navigate({ search: {} }))} userPos={userPos} />;
   }
 
+  const navBtn = (active: boolean) =>
+    `min-h-12 rounded-2xl py-2 text-xs font-semibold flex flex-col items-center justify-center gap-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"}`;
+
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+    <div className="min-h-dvh bg-background text-foreground flex flex-col" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <a href="#contenido" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:rounded-lg focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground">
+        Saltar al contenido
+      </a>
       <header className="sticky top-0 z-10 glass-strong border-x-0 border-t-0 overflow-hidden" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/15 via-transparent to-emerald-500/10" />
-        <div className="px-4 pt-3 pb-2 flex items-center gap-2.5">
-          <span className="w-9 h-9 rounded-2xl bg-primary text-primary-foreground grid place-items-center shadow-lg shadow-primary/30">
+        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/15 via-transparent to-emerald-500/10" aria-hidden="true" />
+        <div className="mx-auto max-w-2xl px-4 pt-3 pb-2 flex items-center gap-2.5">
+          <span className="w-10 h-10 rounded-2xl bg-primary text-primary-foreground grid place-items-center shadow-lg shadow-primary/30" aria-hidden="true">
             <Bus className="w-5 h-5" />
           </span>
           <div className="min-w-0">
-            <h1 className="text-lg font-black tracking-tight leading-none">ArroyoBus</h1>
-            <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">
+            <h1 className="text-xl font-black tracking-tight leading-none">ArroyoBus</h1>
+            <p className="text-xs text-muted-foreground leading-tight mt-1">
               {tab === "stops" ? `${stops.length} paradas · tiempo real` : "Tus tarjetas Buscyl"}
             </p>
           </div>
-          <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> EN VIVO
-          </span>
-          <Link to="/" className="text-[11px] font-semibold text-primary hover:underline">
-            Web
+          <Link to="/" className="ml-auto min-h-11 inline-flex items-center px-3 rounded-full text-sm font-semibold text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            Ir a la web
           </Link>
         </div>
-        {tab === "stops" && <div className="px-4 pb-3">
+        {tab === "stops" && <div className="mx-auto max-w-2xl px-4 pb-3">
+          <label htmlFor="app-stop-search" className="sr-only">Buscar parada</label>
           <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <input
+              id="app-stop-search"
+              type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar parada por nombre o número…"
-              className="w-full pl-10 pr-3 py-3 rounded-2xl glass text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40 transition-shadow"
+              className="w-full pl-10 pr-10 py-3 rounded-2xl glass text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
               inputMode="search"
+              autoComplete="off"
             />
+            {query && (
+              <button onClick={() => setQuery("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 grid place-items-center rounded-full text-muted-foreground hover:bg-accent" aria-label="Borrar búsqueda">
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
-          {userPos && (
-            <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
-              <MapPin className="w-3 h-3" /> Ordenadas por cercanía
-            </p>
-          )}
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground" aria-live="polite">
+            <span className="flex items-center gap-1">
+              <MapPin className="w-3.5 h-3.5" aria-hidden="true" />
+              {geo === "ok" ? "Ordenadas por cercanía" : geo === "locating" ? "Buscando tu ubicación…" : geo === "denied" ? "Sin permiso de ubicación · orden por número" : "Orden por número"}
+            </span>
+            {geo !== "ok" && geo !== "locating" && (
+              <button onClick={locate} className="min-h-9 inline-flex items-center gap-1 px-2.5 rounded-full font-semibold text-primary hover:bg-primary/10">
+                <LocateFixed className="w-3.5 h-3.5" aria-hidden="true" /> Usar mi ubicación
+              </button>
+            )}
+          </div>
         </div>}
       </header>
 
-      {tab === "stops" ? <ul className={`flex-1 divide-y divide-border ${isIOS ? "pb-28" : ""}`}>
-        <li className="px-3 py-3">
-          <SanAntonioBanner compact />
-        </li>
-        {filtered.map((s) => {
-          const dist = userPos ? distance(userPos, s) : null;
-          const sa = stopSanAntonioStatus(s.id);
-          return (
-            <li key={s.id}>
-              <button
-                onClick={() => { haptic(); setSelected(s); }}
-                className="ios-press w-full text-left px-4 py-3.5 flex items-center gap-3 hover:bg-accent/50 active:bg-accent transition-colors"
-              >
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-sm font-bold shrink-0 shadow-md shadow-primary/20">
-                  {s.id}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{s.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{s.desc}</p>
-                  {sa.kind !== "none" && (
-                    <p className={`text-[10px] font-semibold mt-0.5 inline-flex items-center gap-1 ${
-                      sa.kind === "plaza-espana" || sa.kind === "flecha-suspended"
-                        ? "text-red-600 dark:text-red-400"
-                        : sa.kind === "buho-fiestas"
-                        ? "text-indigo-600 dark:text-indigo-400"
-                        : "text-amber-600 dark:text-amber-400"
-                    }`}>
-                      {sa.kind === "plaza-espana" || sa.kind === "flecha-suspended" ? "⚠ Suspendida" : sa.kind === "buho-fiestas" ? "🌙 Búho Fiestas" : "★ Hub La Flecha"}
-                    </p>
-                  )}
-                </div>
-                {dist != null && (
-                  <span className="text-[11px] font-semibold tabular-nums shrink-0 px-2 py-1 rounded-full bg-muted text-muted-foreground">
-                    {dist < 1000 ? `${Math.round(dist)} m` : `${(dist / 1000).toFixed(1)} km`}
-                  </span>
-                )}
-                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-              </button>
-            </li>
-          );
-        })}
-        {filtered.length === 0 && (
-          <li className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No hay paradas que coincidan
-          </li>
-        )}
-      </ul> : <div className={isIOS ? "flex-1 pb-28" : "contents"}><CardsView /></div>}
+      <main id="contenido" className={`flex-1 w-full mx-auto max-w-2xl ${isIOS ? "pb-28" : ""}`}>
+      {tab === "stops" ? (
+        <>
+          <div className="px-3 py-3"><SanAntonioBanner compact /></div>
+          <p className="sr-only" aria-live="polite">{filtered.length} paradas encontradas</p>
+          <ul className="divide-y divide-border" aria-label="Paradas">
+            {filtered.map((s) => {
+              const dist = userPos ? distance(userPos, s) : null;
+              const sa = stopSanAntonioStatus(s.id);
+              return (
+                <li key={s.id}>
+                  <button
+                    onClick={() => openStop(s)}
+                    className="ios-press w-full text-left px-4 py-3.5 flex items-center gap-3 hover:bg-accent/50 active:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    aria-label={`Parada ${s.id}, ${s.name}${dist != null ? `, a ${fmtDist(dist)}` : ""}`}
+                  >
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-sm font-bold shrink-0 shadow-md shadow-primary/20" aria-hidden="true">
+                      {s.id}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[15px] font-semibold truncate">{s.name}</p>
+                      <p className="text-sm text-muted-foreground truncate">{s.desc}</p>
+                      {sa.kind !== "none" && (
+                        <p className={`text-xs font-semibold mt-0.5 inline-flex items-center gap-1 ${
+                          sa.kind === "plaza-espana" || sa.kind === "flecha-suspended"
+                            ? "text-destructive"
+                            : "text-amber-700 dark:text-amber-400"
+                        }`}>
+                          {sa.kind === "plaza-espana" || sa.kind === "flecha-suspended" ? "⚠ Suspendida" : sa.kind === "buho-fiestas" ? "🌙 Búho Fiestas" : "★ Hub La Flecha"}
+                        </p>
+                      )}
+                    </div>
+                    {dist != null && (
+                      <span className="text-xs font-semibold tabular-nums shrink-0 px-2 py-1 rounded-full bg-muted text-muted-foreground" aria-hidden="true">
+                        {fmtDist(dist)}
+                      </span>
+                    )}
+                    <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {filtered.length === 0 && (
+            <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+              <p>No hay paradas que coincidan con «{query}».</p>
+              <button onClick={() => setQuery("")} className="mt-3 min-h-11 px-4 rounded-full bg-primary/10 text-primary font-semibold">Ver todas</button>
+            </div>
+          )}
+        </>
+      ) : <CardsView />}
+      </main>
 
       {isIOS ? (
-        /* iPhone: dock flotante Liquid Glass (estilo iOS 26) */
         <nav
           className="fixed inset-x-0 z-20 px-6 pointer-events-none"
           style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
-          aria-label="Navegación"
+          aria-label="Navegación principal"
         >
-          <div className="ios-dock glass-strong pointer-events-auto mx-auto max-w-sm grid grid-cols-3 p-1.5">
-            <button
-              onClick={() => { haptic(); setTab("stops"); }}
-              className={`ios-press rounded-full py-2 text-[11px] font-semibold flex flex-col items-center gap-0.5 ${tab === "stops" ? "text-primary bg-primary/10" : "text-muted-foreground"}`}
-            >
-              <Bus className="w-5 h-5" /> Paradas
+          <div className="ios-dock glass-strong pointer-events-auto mx-auto max-w-sm grid grid-cols-3 gap-1 p-1.5">
+            <button onClick={() => { haptic(); setTab("stops"); }} aria-current={tab === "stops" ? "page" : undefined} className={navBtn(tab === "stops")}>
+              <Bus className="w-5 h-5" aria-hidden="true" /> Paradas
             </button>
-            <button
-              onClick={() => { haptic(); setTab("cards"); }}
-              className={`ios-press rounded-full py-2 text-[11px] font-semibold flex flex-col items-center gap-0.5 ${tab === "cards" ? "text-primary bg-primary/10" : "text-muted-foreground"}`}
-            >
-              <CreditCard className="w-5 h-5" /> Buscyl
+            <button onClick={() => { haptic(); setTab("cards"); }} aria-current={tab === "cards" ? "page" : undefined} className={navBtn(tab === "cards")}>
+              <CreditCard className="w-5 h-5" aria-hidden="true" /> Buscyl
             </button>
-            <Link to="/" className="ios-press rounded-full py-2 text-[11px] font-semibold text-muted-foreground flex flex-col items-center gap-0.5">
-              <MapIcon className="w-5 h-5" /> Mapa
+            <Link to="/" className={navBtn(false)}>
+              <MapIcon className="w-5 h-5" aria-hidden="true" /> Mapa
             </Link>
           </div>
         </nav>
       ) : (
-        <nav className="sticky bottom-0 border-t border-border bg-background/90 backdrop-blur-xl">
-          <div className="grid grid-cols-3">
-            <button onClick={() => setTab("stops")} className={`py-3 text-xs font-semibold flex flex-col items-center gap-0.5 transition-colors ${tab === "stops" ? "text-primary" : "text-muted-foreground"}`}>
-              <Bus className="w-5 h-5" /> Paradas
+        <nav className="sticky bottom-0 border-t border-border bg-background/90 backdrop-blur-xl" aria-label="Navegación principal">
+          <div className="mx-auto max-w-2xl grid grid-cols-3 gap-1 p-1.5">
+            <button onClick={() => setTab("stops")} aria-current={tab === "stops" ? "page" : undefined} className={navBtn(tab === "stops")}>
+              <Bus className="w-5 h-5" aria-hidden="true" /> Paradas
             </button>
-            <button onClick={() => setTab("cards")} className={`py-3 text-xs font-semibold flex flex-col items-center gap-0.5 transition-colors ${tab === "cards" ? "text-primary" : "text-muted-foreground"}`}>
-              <CreditCard className="w-5 h-5" /> Buscyl
+            <button onClick={() => setTab("cards")} aria-current={tab === "cards" ? "page" : undefined} className={navBtn(tab === "cards")}>
+              <CreditCard className="w-5 h-5" aria-hidden="true" /> Buscyl
             </button>
-            <Link to="/" className="py-3 text-xs font-medium text-muted-foreground flex flex-col items-center gap-0.5">
-              <MapIcon className="w-5 h-5" /> Mapa
+            <Link to="/" className={navBtn(false)}>
+              <MapIcon className="w-5 h-5" aria-hidden="true" /> Mapa
             </Link>
           </div>
         </nav>
@@ -230,124 +257,188 @@ function AppPage() {
   );
 }
 
+async function fetchArrivals(stopId: string, signal: AbortSignal): Promise<Arrival[]> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener("abort", onAbort);
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const res = await fetch(`/api/stops/${encodeURIComponent(stopId)}`, { signal: ctrl.signal, cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return Array.isArray(json?.arrivals) ? json.arrivals : [];
+    } catch (e) {
+      lastErr = e;
+      if (signal.aborted) throw e;
+      await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+    } finally {
+      clearTimeout(t);
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+  throw lastErr;
+}
+
 function StopDetail({ stop, onBack, userPos }: { stop: Stop; onBack: () => void; userPos: { lat: number; lon: number } | null }) {
   const [arrivals, setArrivals] = useState<Arrival[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [updated, setUpdated] = useState<string>("");
+  const [error, setError] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const inflight = useRef<AbortController | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    inflight.current?.abort();
+    const ctrl = new AbortController();
+    inflight.current = ctrl;
+    setLoading(true);
     try {
-      const res = await fetch(`/api/stops/${stop.id}`);
-      if (!res.ok) return;
-      const json = await res.json();
-      setArrivals(json.arrivals || []);
-      setUpdated(new Date().toLocaleTimeString("es-ES"));
+      const list = await fetchArrivals(stop.id, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      setArrivals(list.sort((a, b) => a.estimatedArrival - b.estimatedArrival));
+      setUpdatedAt(Date.now());
+      setError(false);
+    } catch {
+      if (!ctrl.signal.aborted) setError(true);
     } finally {
-      setLoading(false);
+      if (inflight.current === ctrl) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    load();
-    const i = setInterval(load, 15000);
-    return () => clearInterval(i);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stop.id]);
 
+  useEffect(() => {
+    setArrivals(null);
+    setError(false);
+    headingRef.current?.focus();
+    load();
+    const i = setInterval(() => { if (document.visibilityState === "visible" && navigator.onLine !== false) load(); }, 15000);
+    const tick = setInterval(() => setNow(Date.now()), 5000);
+    const onVis = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("online", load);
+    return () => {
+      clearInterval(i);
+      clearInterval(tick);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("online", load);
+      inflight.current?.abort();
+    };
+  }, [load]);
+
   const dist = userPos ? distance(userPos, stop) : null;
+  const ageSec = updatedAt ? Math.max(0, Math.round((now - updatedAt) / 1000)) : null;
+  const stale = ageSec != null && ageSec > 60;
+  const slug = slugForStop(stop.id);
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+    <div className="min-h-dvh bg-background text-foreground flex flex-col" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
       <header className="sticky top-0 z-10 glass-strong border-x-0 border-t-0" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-        <div className="px-3 py-3 flex items-center gap-2">
-          <button onClick={onBack} className="p-2 -ml-2 rounded-lg active:bg-accent" aria-label="Volver">
+        <div className="mx-auto max-w-2xl px-2 py-2 flex items-center gap-1">
+          <button onClick={onBack} className="w-11 h-11 grid place-items-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Volver a la lista de paradas">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] text-muted-foreground">Parada {stop.id} · {stop.desc}</p>
-            <h2 className="text-sm font-semibold truncate">{stop.name}</h2>
+            <p className="text-xs text-muted-foreground truncate">Parada {stop.id} · {stop.desc}</p>
+            <h2 ref={headingRef} tabIndex={-1} className="text-base font-bold truncate focus:outline-none">{stop.name}</h2>
           </div>
-          <button onClick={load} className="p-2 rounded-lg active:bg-accent" aria-label="Refrescar">
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          <button onClick={load} disabled={loading} className="w-11 h-11 grid place-items-center rounded-full hover:bg-accent disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Actualizar llegadas">
+            <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
       </header>
 
-      <div className="px-4 py-2 text-xs text-muted-foreground flex items-center justify-between">
-        <span>{updated && `Actualizado ${updated}`}</span>
-        {dist != null && <span>{dist < 1000 ? `${Math.round(dist)} m` : `${(dist / 1000).toFixed(1)} km`}</span>}
-      </div>
+      <main className="flex-1 w-full mx-auto max-w-2xl">
+        <div className="px-4 py-2 text-xs text-muted-foreground flex items-center justify-between" aria-live="polite">
+          <span className={stale ? "text-amber-700 dark:text-amber-400 font-semibold" : ""}>
+            {ageSec == null ? (loading ? "Cargando…" : "") : ageSec < 10 ? "Actualizado ahora" : `Actualizado hace ${ageSec < 60 ? `${ageSec} s` : `${Math.round(ageSec / 60)} min`}`}
+          </span>
+          {dist != null && <span>A {fmtDist(dist)} de ti</span>}
+        </div>
 
-      <div className="px-3 space-y-2">
-        <StopSanAntonioNotice stopId={stop.id} compact />
-        {slugForStop(stop.id) && (
-          <Link
-            to="/parada/$slug"
-            params={{ slug: slugForStop(stop.id)! }}
-            className="block text-center px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20"
-          >
-            <ExternalLink className="w-3 h-3 inline mr-1" />
-            Ver página completa de la parada (ubicación, Street View, horario)
-          </Link>
+        {error && (
+          <div role="alert" className="mx-3 mb-2 p-3 rounded-2xl border border-destructive/30 bg-destructive/10 flex items-center gap-3">
+            <WifiOff className="w-5 h-5 text-destructive shrink-0" aria-hidden="true" />
+            <p className="text-sm flex-1">
+              {arrivals ? "No se pudo actualizar. Mostrando los últimos datos." : "No se pudieron cargar las llegadas. Comprueba tu conexión."}
+            </p>
+            <button onClick={load} className="min-h-10 px-3 rounded-full bg-destructive text-destructive-foreground text-sm font-semibold">Reintentar</button>
+          </div>
         )}
-      </div>
 
-      <ul className="flex-1 divide-y divide-border">
-        {loading && !arrivals && (
-          <li className="px-4 py-8 text-center text-sm text-muted-foreground">Cargando llegadas…</li>
-        )}
-        {arrivals && arrivals.length === 0 && (
-          <li className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No hay llegadas próximas en este momento
-          </li>
-        )}
-        {arrivals?.map((a) => {
-          const color = a.routeColor ? `#${a.routeColor}` : undefined;
-          const short = a.routeShortName || a.routeName || "—";
-          const min = a.minutesAway;
-          return (
-            <li key={`${a.tripId}-${a.vehicleId}-${a.estimatedArrival}`} className="px-4 py-3.5 flex items-center gap-3 animate-fade-in hover:bg-accent/40 transition-colors">
-              <span
-                className="px-2.5 py-1 rounded-full text-[11px] font-semibold text-white shrink-0"
-                style={{ backgroundColor: color || "hsl(var(--primary))" }}
-              >
-                {short}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{a.tripHeadsign || a.routeName}</p>
-                <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                  {a.isScheduled ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-medium">
-                      <CalendarClock className="w-3 h-3" /> Horario
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-medium">
-                      <Radio className="w-3 h-3" /> En vivo
-                    </span>
-                  )}
-                  <span className="truncate">
-                    {a.isScheduled
-                      ? "Según horario"
-                      : `Bus ${a.vehicleId}${a.isEstimated ? " · estimado" : ""}`}
+        <div className="px-3 space-y-2">
+          <StopSanAntonioNotice stopId={stop.id} compact />
+          {slug && (
+            <Link
+              to="/parada/$slug"
+              params={{ slug }}
+              className="flex items-center justify-center gap-1.5 min-h-11 px-3 rounded-2xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20"
+            >
+              <ExternalLink className="w-4 h-4" aria-hidden="true" />
+              Ubicación, Street View y horario
+            </Link>
+          )}
+        </div>
+
+        <section aria-label="Próximas llegadas" aria-busy={loading && !arrivals} className="mt-2">
+          {loading && !arrivals && !error && (
+            <ul className="px-4 space-y-3 py-2" aria-hidden="true">
+              {[0, 1, 2].map((i) => <li key={i} className="h-14 rounded-2xl bg-muted animate-pulse" />)}
+            </ul>
+          )}
+          {arrivals && arrivals.length === 0 && (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">No hay llegadas próximas en este momento.</p>
+          )}
+          <ul className="divide-y divide-border">
+            {arrivals?.map((a) => {
+              const color = a.routeColor ? `#${a.routeColor}` : undefined;
+              const short = a.routeShortName || a.routeName || "—";
+              const min = Math.max(0, a.minutesAway);
+              const time = new Date(a.estimatedArrival * 1000).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+              const label = `Línea ${short}, ${a.tripHeadsign || a.routeName}, ${min === 0 && !a.isScheduled ? "llegando ahora" : `en ${min} minutos`}, a las ${time}, ${a.isScheduled ? "según horario" : "en tiempo real"}`;
+              return (
+                <li key={`${a.tripId}-${a.vehicleId}-${a.estimatedArrival}`} aria-label={label} className="px-4 py-3.5 flex items-center gap-3 animate-fade-in">
+                  <span
+                    className="min-w-12 text-center px-2.5 py-1.5 rounded-xl text-xs font-bold text-white shrink-0 shadow-sm"
+                    style={{ backgroundColor: color || "var(--primary)" }}
+                    aria-hidden="true"
+                  >
+                    {short}
                   </span>
-                </p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className={`text-2xl font-black tabular-nums leading-none ${a.isScheduled ? "text-muted-foreground" : ""}`}>
-                  {min === 0 && !a.isScheduled ? "Ahora" : `${min}′`}
-                </p>
-                <p className="text-[10px] text-muted-foreground">
-                  {new Date(a.estimatedArrival * 1000).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-                </p>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                  <div className="min-w-0 flex-1" aria-hidden="true">
+                    <p className="text-[15px] font-semibold truncate">{a.tripHeadsign || a.routeName}</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                      {a.isScheduled ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 font-medium">
+                          <CalendarClock className="w-3 h-3" /> Horario
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 font-medium">
+                          <Radio className="w-3 h-3" /> En vivo
+                        </span>
+                      )}
+                      <span className="truncate">
+                        {a.isScheduled ? "Según horario" : `Bus ${a.vehicleId}${a.isEstimated ? " · estimado" : ""}`}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0" aria-hidden="true">
+                    <p className={`text-2xl font-black tabular-nums leading-none ${a.isScheduled ? "text-muted-foreground" : ""}`}>
+                      {min === 0 && !a.isScheduled ? "Ahora" : `${min}′`}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{time}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
 
-      <div className="px-3 pb-4">
-        <StopScheduleViewer stopId={stop.id} />
-      </div>
+        <div className="px-3 py-4">
+          <StopScheduleViewer stopId={stop.id} />
+        </div>
+      </main>
     </div>
   );
 }
@@ -372,7 +463,7 @@ function CardsView() {
           <div className="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
             <CreditCard className="w-8 h-8" />
           </div>
-              <h2 className="text-base font-semibold">Tus tarjetas Buscyl</h2>
+              <h2 className="text-lg font-semibold">Tus tarjetas Buscyl</h2>
           <p className="text-sm text-muted-foreground max-w-xs">
             Guarda el QR de tu tarjeta Buscyl en el dispositivo para enseñarlo en el bus sin conexión.
           </p>
@@ -466,22 +557,23 @@ function CardEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-labelledby="card-editor-title" className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center" onClick={onClose} onKeyDown={(e) => e.key === "Escape" && onClose()}>
       <div
         className="w-full sm:max-w-md bg-background rounded-t-2xl sm:rounded-2xl p-5 space-y-4"
         onClick={(e) => e.stopPropagation()}
         style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}
       >
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold flex-1">{initial ? "Editar tarjeta" : "Nueva tarjeta Buscyl"}</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg active:bg-accent" aria-label="Cerrar">
+          <h2 id="card-editor-title" className="text-base font-semibold flex-1">{initial ? "Editar tarjeta" : "Nueva tarjeta Buscyl"}</h2>
+          <button onClick={onClose} className="w-10 h-10 grid place-items-center rounded-full hover:bg-accent" aria-label="Cerrar" autoFocus>
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Nombre</label>
+          <label htmlFor="card-label" className="text-sm font-medium text-muted-foreground">Nombre</label>
           <input
+            id="card-label"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Mi tarjeta"
@@ -490,8 +582,9 @@ function CardEditor({
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Contenido del QR (número o texto)</label>
+          <label htmlFor="card-data" className="text-sm font-medium text-muted-foreground">Contenido del QR (número o texto)</label>
           <textarea
+            id="card-data"
             value={data}
             onChange={(e) => setData(e.target.value)}
             placeholder="Pega aquí el código de tu tarjeta Buscyl"
@@ -511,15 +604,16 @@ function CardEditor({
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Color</label>
+          <p className="text-sm font-medium text-muted-foreground">Color</p>
           <div className="flex gap-2 flex-wrap">
             {CARD_COLORS.map((c) => (
               <button
                 key={c}
                 onClick={() => setColor(c)}
-                className={`w-8 h-8 rounded-full border-2 ${color === c ? "border-foreground" : "border-transparent"}`}
+                aria-pressed={color === c}
+                className={`w-10 h-10 rounded-full border-2 ${color === c ? "border-foreground" : "border-transparent"}`}
                 style={{ backgroundColor: c }}
-                aria-label={`Color ${c}`}
+                aria-label={`Color ${CARD_COLORS.indexOf(c) + 1}`}
               />
             ))}
           </div>
@@ -625,9 +719,9 @@ function QrScanner({ onClose, onResult }: { onClose: () => void; onResult: (text
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black flex flex-col" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+    <div role="dialog" aria-modal="true" aria-label="Escanear QR" className="fixed inset-0 z-[60] bg-black flex flex-col" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       <header className="flex items-center gap-2 px-3 py-3 text-white">
-        <button onClick={onClose} className="p-2 rounded-lg active:bg-white/10" aria-label="Cerrar">
+        <button onClick={onClose} className="w-11 h-11 grid place-items-center rounded-full hover:bg-white/10 active:bg-white/10" aria-label="Cerrar">
           <X className="w-5 h-5" />
         </button>
         <h2 className="text-sm font-semibold flex-1">Escanear QR Buscyl</h2>
@@ -700,21 +794,21 @@ function CardViewer({
   }, [card.data]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex flex-col" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label={`Tarjeta ${card.label}`} className="fixed inset-0 z-50 bg-black/80 flex flex-col" onClick={onClose} onKeyDown={(e) => e.key === "Escape" && onClose()}>
       <div
         className="flex-1 flex flex-col"
         onClick={(e) => e.stopPropagation()}
         style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <header className="flex items-center gap-2 px-3 py-3 text-white">
-          <button onClick={onClose} className="p-2 rounded-lg active:bg-white/10" aria-label="Volver">
+          <button onClick={onClose} className="w-11 h-11 grid place-items-center rounded-full hover:bg-white/10 active:bg-white/10" aria-label="Volver">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="text-sm font-semibold flex-1 truncate">{card.label}</h2>
-          <button onClick={onEdit} className="p-2 rounded-lg active:bg-white/10" aria-label="Editar">
+          <button onClick={onEdit} className="w-11 h-11 grid place-items-center rounded-full hover:bg-white/10 active:bg-white/10" aria-label="Editar">
             <Pencil className="w-4 h-4" />
           </button>
-          <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg active:bg-white/10" aria-label="Eliminar">
+          <button onClick={() => setConfirmDelete(true)} className="w-11 h-11 grid place-items-center rounded-full hover:bg-white/10 active:bg-white/10" aria-label="Eliminar">
             <Trash2 className="w-4 h-4" />
           </button>
         </header>
@@ -737,9 +831,9 @@ function CardViewer({
         </div>
 
         {confirmDelete && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-6" onClick={() => setConfirmDelete(false)}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-del" className="absolute inset-0 bg-black/70 flex items-center justify-center p-6" onClick={() => setConfirmDelete(false)}>
             <div className="bg-background rounded-2xl p-5 max-w-sm w-full space-y-4" onClick={(e) => e.stopPropagation()}>
-              <h4 className="text-base font-semibold">Eliminar tarjeta</h4>
+              <h3 id="confirm-del" className="text-base font-semibold">Eliminar tarjeta</h3>
               <p className="text-sm text-muted-foreground">¿Seguro que quieres eliminar “{card.label}”? Esta acción no se puede deshacer.</p>
               <div className="flex gap-2">
                 <button onClick={() => setConfirmDelete(false)} className="flex-1 py-2.5 rounded-lg border border-border text-sm font-medium">
