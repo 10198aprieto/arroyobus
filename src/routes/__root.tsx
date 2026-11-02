@@ -67,10 +67,13 @@ export const Route = createRootRoute({
         href: appCss,
       },
     ],
-    scripts: [
-      {
-        type: "application/ld+json",
-        children: JSON.stringify({
+  }),
+  shellComponent: RootShell,
+  component: RootComponent,
+  notFoundComponent: NotFoundComponent,
+});
+
+const JSON_LD = JSON.stringify({
           "@context": "https://schema.org",
           "@graph": [
             {
@@ -89,14 +92,7 @@ export const Route = createRootRoute({
                 "Proyecto independiente que publica datos abiertos del transporte urbano de Arroyo de la Encomienda (Valladolid).",
             },
           ],
-        }),
-      },
-    ],
-  }),
-  shellComponent: RootShell,
-  component: RootComponent,
-  notFoundComponent: NotFoundComponent,
-});
+        });
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
@@ -105,6 +101,7 @@ function RootShell({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON_LD }} />
         {children}
         <Scripts />
       </body>
