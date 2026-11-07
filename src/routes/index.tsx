@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Bus, MapPin, Clock, ExternalLink, Download, Smartphone, Send, Copy, Check, Activity, Radio, HelpCircle, AlertTriangle, Phone } from "lucide-react";
+import { Bus, MapPin, Clock, ExternalLink, Download, Smartphone, Send, Copy, Check, Activity, Radio, HelpCircle, AlertTriangle, } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 const BusMap = lazy(() => import("@/components/BusMap"));
@@ -366,41 +366,6 @@ function Index() {
             <code className="px-2 py-1 rounded-md bg-background border border-border">/buscar Camino</code>
             <code className="px-2 py-1 rounded-md bg-background border border-border">/alertar 100 5</code>
             <code className="px-2 py-1 rounded-md bg-background border border-border">/recordar 100 08:30</code>
-          </div>
-        </section>
-
-        {/* Asistente telefónico */}
-        <section
-          aria-labelledby="telefono-title"
-          className="ios-press glass rounded-2xl border-indigo-200/70 dark:border-indigo-900/70 bg-gradient-to-br from-indigo-50/60 dark:from-indigo-950/30 to-violet-50/60 dark:to-violet-950/30 p-6 sm:p-8"
-        >
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-            <div className="flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-md">
-              <Phone className="w-6 h-6" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h2 id="telefono-title" className="text-xl font-bold tracking-tight mb-1">
-                Asistente telefónico
-              </h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                Llama gratis y pregunta por autobuses, paradas, horarios e incidencias. También puedes gestionar tu tarjeta BusCyL.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
-                <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Posición del bus</span>
-                <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Tiempos de llegada</span>
-                <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Buscador de paradas</span>
-                <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Rutas detalladas</span>
-                <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Estado del servicio</span>
-                <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Horarios y calendarios</span>
-                <span className="flex items-center gap-2 sm:col-span-2"><span className="w-1.5 h-1.5 rounded-full bg-primary" /> Gestión de tarjeta BusCyL</span>
-              </div>
-            </div>
-            <a
-              href="tel:941683091"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold text-sm shadow-lg hover:opacity-90 transition-opacity"
-            >
-              <Phone className="w-4 h-4" /> 941 683 091
-            </a>
           </div>
         </section>
 
