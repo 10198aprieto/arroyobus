@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Bus, MapPin, Clock, ExternalLink, Download, Smartphone, Send, Copy, Check, Activity, Radio, HelpCircle, AlertTriangle, } from "lucide-react";
+import { NoRealtimeNotice } from "@/components/NoRealtimeNotice";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 const BusMap = lazy(() => import("@/components/BusMap"));
@@ -254,6 +255,7 @@ function Index() {
             <h2 id="mapa-title" className="text-2xl font-bold tracking-tight">Mapa en vivo</h2>
             <span className="text-xs text-muted-foreground">Actualización cada 15 s</span>
           </div>
+          <NoRealtimeNotice />
           <Suspense fallback={<div className="border border-border rounded-2xl h-[440px] bg-card animate-pulse" />}>
             <BusMap />
           </Suspense>

@@ -1,3 +1,4 @@
+import { NoRealtimeNotice } from "@/components/NoRealtimeNotice";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bus, Search, MapPin, RefreshCw, ArrowLeft, Map as MapIcon, CreditCard, Plus, Trash2, X, Pencil, ScanLine, Camera, Radio, CalendarClock, ChevronRight, WifiOff, LocateFixed } from "lucide-react";
@@ -168,6 +169,7 @@ function AppPage() {
       </header>
 
       <main id="contenido" className={`flex-1 w-full mx-auto max-w-2xl ${isIOS ? "pb-28" : ""}`}>
+        <NoRealtimeNotice className="m-4" />
       {tab === "stops" ? (
         <>
           <div className="px-3 py-3"><SanAntonioBanner compact /></div>
