@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 const BusMap = lazy(() => import("@/components/BusMap"));
 import SanAntonioBanner from "@/components/SanAntonioBanner";
 import PresenceBadge from "@/components/PresenceBadge";
+import VisitCounter from "@/components/VisitCounter";
 import AirQualityBadge from "@/components/AirQualityBadge";
 import { Typewriter } from "@/components/ui/typewriter";
 import VaporizeTextCycle, { Tag as VaporTag } from "@/components/ui/vapour-text-effect";
@@ -237,6 +238,7 @@ function Index() {
 
         <div className="flex flex-wrap items-center gap-3">
           <PresenceBadge />
+          <VisitCounter />
           <AirQualityBadge />
           <Link
             to="/avisos"
